@@ -1,0 +1,287 @@
+---
+title: "Crime Resolution Analysis in New Zealand"
+author: "Rexstane Nissi Stanley"
+date: "2025-10-03"
+output: pdf_document
+
+---
+
+# Introduction
+
+Crime investigation outcomes are an important measure of how effectively police services resolve offences over time. In New Zealand, the Police Data NZ dashboard provides publicly available information on reported victimisations, offence categories based on the Australian and New Zealand Standard Offence Classification (ANZSOC), and the recorded outcomes of investigations (New Zealand Police, 2025).
+
+This report examines how resolution rates change across different investigation stages - specifically at 7, 30, 90, and 180 days - for various ANZSOC Divisions. The main research question is:
+
+**How do the proportions of resolved and unresolved cases change over time across the five most frequent ANZSOC Divisions in New Zealand?**
+
+# Methods
+
+## Data Source
+The dataset was extracted from the “Victimisations (Demographics)” section of the NZ Police Data NZ portal (https://www.police.govt.nz/about-us/publications-statistics/data-and-statistics/policedatanz
+).
+It contains records of victimisations, grouped by:
+
+(i) ANZSOC Division, Group, and Subdivision
+(ii) Police District and Area
+(iii) Outcome of Investigation after 7, 30, 90 and 180 days
+(iv) Victimisation count
+
+## Data Cleaning and Preparation
+1. **File loading:** The dataset was loaded into R using the read.csv() function with parameters to retain original column names and text formats, ensuring accurate import of all variables for subsequent cleaning and analysis.
+2. **Resolved classification:** A helper function is_resolved() groups outcomes such as Court action, Formal warning, or Non-court action as Resolved, all others as Unresolved.
+3. **Top five divisions:** Divisions were ranked by total victimisations; the top five were selected for deeper study.
+4. **Time windows:** The dataset was reshaped to long format across 7, 30, 90, and 180-day periods for comparative analysis.
+5. **Year extraction:** Year was parsed from Year Month to study annual resolution trends.
+
+## Analytical Approach
+Three key analyses were performed using tidyverse and ggplot2:
+1. 180-day Outcome Summary
+2. Line chart of resolved-rate trajectory (7 → 30 → 90 → 180).
+3. Year-wise resolved-rate trend for top five divisions.
+Each visualisation uses percentages (n/sum(n)) to allow comparability across crime types.
+
+# Results
+
+## 1. 180-Day Outcome Summary
+
+Table 1 (below) summarises the number of resolved and unresolved cases at 180 days for the top five ANZSOC divisions. It highlights the scale of unresolved cases, particularly in Assault (383,988 unresolved) and Theft (779,360 unresolved), compared to the smaller totals in categories like Robbery etc. and Harm persons.
+
+```{r, echo=FALSE, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(kableExtra)
+```
+
+```{r, echo=FALSE, include=FALSE}
+# Read data
+dat <- read.csv("../data/ROV Tab ARG_Full Data_data.csv",
+                stringsAsFactors = FALSE, check.names = FALSE)
+```
+
+```{r, echo=FALSE, include=FALSE}
+# Function to classify resolved and unresolved outcomes
+is_resolved <- function(x) {
+  str_detect(x, regex(
+    "Court action|Formal caution|Formal warning|Informal warning|Informal caution|Non-court action",
+    ignore_case = TRUE
+  ))
+}
+
+# Top 5 divisions by Victimisations
+top5_div <- dat %>%
+  group_by(`ANZSOC Division`) %>%
+  summarise(total = sum(Victimisations, na.rm = TRUE), .groups = "drop") %>%
+  slice_max(total, n = 5) %>%
+  pull(`ANZSOC Division`)
+```
+
+```{r, include=FALSE}
+# Summarise 180-day outcomes (using same resolved definition)
+table_180 <- dat %>%
+  filter(`ANZSOC Division` %in% top5_div) %>%
+  transmute(`ANZSOC Division`,
+            outcome = `Outcome Of Investigation 180`,
+            n = as.numeric(Victimisations)) %>%
+  mutate(outcome_grouped = if_else(is_resolved(outcome), "Resolved", "Unresolved")) %>%
+  group_by(`ANZSOC Division`, outcome_grouped) %>%
+  summarise(total = sum(n, na.rm = TRUE), .groups = "drop_last") %>%
+  arrange(`ANZSOC Division`, desc(outcome_grouped))
+```
+
+```{r, echo=FALSE}
+# Show as formatted table
+table_180 %>%
+  kbl(
+    caption   = "180-day Resolved vs Unresolved Outcomes by ANZSOC Division",
+    digits    = 2,
+    col.names = c("Division", "Outcome Group", "Victimisations"),
+    booktabs  = TRUE
+  ) %>%
+  kable_classic(full_width = FALSE) %>%
+  kable_styling(latex_options = "hold_position")
+
+```
+Figure 1 (below) compares proportions of resolved vs unresolved outcomes across the same divisions at 7 days and 180 days.
+```{r, include=FALSE}
+# Build one long table for all four timepoints
+long_all <- bind_rows(
+  dat %>% transmute(tp = "7",   `ANZSOC Division`,
+                    outcome = `Outcome Of Investigation 7`,   n = as.numeric(Victimisations)),
+  dat %>% transmute(tp = "30",  `ANZSOC Division`,
+                    outcome = `Outcome Of Investigation 30`,  n = as.numeric(Victimisations)),
+  dat %>% transmute(tp = "90",  `ANZSOC Division`,
+                    outcome = `Outcome Of Investigation 90`,  n = as.numeric(Victimisations)),
+  dat %>% transmute(tp = "180", `ANZSOC Division`,
+                    outcome = `Outcome Of Investigation 180`, n = as.numeric(Victimisations))
+) %>%
+  filter(`ANZSOC Division` %in% top5_div,
+         !is.na(outcome), outcome != "", !is.na(n), n > 0)
+
+# Subset: only 7 and 180 days
+long_7_180 <- long_all %>% filter(tp %in% c("7","180"))
+
+# Collapse outcomes into Resolved vs Unresolved (7 vs 180)
+plot_data <- long_7_180 %>%
+  mutate(outcome_grouped = if_else(is_resolved(outcome), "Resolved", "Unresolved")) %>%
+  group_by(`ANZSOC Division`, tp, outcome_grouped) %>%
+  summarise(n = sum(n), .groups = "drop_last") %>%
+  mutate(pct = n / sum(n)) %>%
+  ungroup()
+
+plot_data <- plot_data %>%
+  mutate(`ANZSOC Division` = recode(`ANZSOC Division`,
+    "Robbery, blackmail, and extortion" = "Robbery etc.",
+    "Harm or endanger persons" = "Harm persons",
+    "Sexual Offences" = "Sexual"
+  ))
+```
+
+```{r, echo=FALSE, fig.width=6, fig.height=3.5, out.width="70%", fig.align='center'}
+# Plot 1: Resolved vs Unresolved - 7 vs 180 days 
+ggplot(plot_data, aes(x = `ANZSOC Division`, y = pct, fill = outcome_grouped)) +
+  geom_col() +
+  facet_wrap(~ tp, nrow = 1, labeller = as_labeller(c(`7`="7 days", `180`="180 days"))) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Resolved vs Unresolved outcomes at 7 vs 180 days",
+       x = "ANZSOC Division", y = "Share of outcomes", fill = "Outcome") +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 40, hjust = 1))
+```
+
+### Interpretation:
+
+1. At 7 days, all divisions show very low resolution (under 20%). The majority of cases remain unresolved due to the early stage of investigation.
+2. By 180 days, resolution improves significantly for Assault and Sexual offences, though unresolved cases still dominate.
+3. Robbery etc. stands out with around 25–30% of cases resolved by 180 days, higher than Theft and Assault, reflecting stronger investigative follow-through.
+4. Theft remains almost entirely unresolved, with less than 10% resolved even after 180 days, showing the difficulty of solving property-related offences.
+5. The crime of harming or endangering persons shows a sharper improvement compared to 7 days, with resolution nearly doubling, though unresolved cases still form the majority.
+
+**Key takeaway**: Both the table (counts) and plot (proportions) confirm that while resolution rates increase over time, high-volume divisions (Theft, Assault) accumulate the largest unresolved backlogs, whereas lower-volume but serious divisions (Robbery, Harm persons) achieve better closure rates.
+
+## Resolved-Rate Trajectory (7 → 30 → 90 → 180 Days)
+To understand how investigative outcomes evolve over different time horizons, resolution rates were tracked at 7, 30, 90, and 180 days for each of the top five ANZSOC divisions. This analysis highlights the pace at which cases move from unresolved to resolved status across these investigation stages.
+```{r, echo=FALSE, fig.width=6, fig.height=3.5, out.width="70%", fig.align='center'}
+# Plot 2: Resolved-rate trajectory (7→30→90→180)
+traj <- long_all %>%
+  group_by(`ANZSOC Division`, tp) %>%
+  summarise(total = sum(n, na.rm = TRUE),
+            resolved = sum(n[is_resolved(outcome)], na.rm = TRUE),
+            .groups = "drop") %>%
+  mutate(resolved_rate = if_else(total > 0, resolved / total, NA_real_),
+         tp_num = as.integer(tp))   # 7, 30, 90, 180 for x-axis
+
+ggplot(traj, aes(x = tp_num, y = resolved_rate, group = `ANZSOC Division`, colour = `ANZSOC Division`)) +
+  geom_line() +
+  geom_point() +
+  scale_x_continuous(breaks = c(7, 30, 90, 180)) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Resolved-rate trajectory by ANZSOC Division (7→30→90→180)",
+       x = "Days since offence", y = "Resolved rate", colour = "ANZSOC Division") +
+  theme_minimal(base_size = 11)
+
+
+
+```
+
+### Interpretation:
+
+1. All divisions follow an upward trajectory, confirming that resolution rates improve as investigations proceed.
+2. Harm persons leads consistently, rising from ~33% at day 7 to ~45% by day 180.
+3. Assault climbs from ~23% to ~27%, while Robbery etc. improves from ~16% to ~25%.
+4. Sexual offences remain low but show steady improvement (6% → 17%).
+5. Theft is the weakest performer, stuck below 7% even after 180 days.
+
+**Key Takeaway:** While more time clearly increases resolution rates, the benefits are uneven: Harm persons and Robbery etc. improve strongly, but Theft shows negligible progress, signalling systemic challenges in property-crime investigations.
+
+## Resolution Rates Across Years
+To understand how investigation outcomes have changed over time, yearly resolution rates were analysed for each of the top five ANZSOC divisions. This comparison shows whether certain offence types have improved, declined, or remained stable in how often they are resolved each year.
+
+```{r, include=FALSE}
+dat <- dat %>%
+  mutate(Year = as.integer(substr(`Year Month`, nchar(`Year Month`) - 3, nchar(`Year Month`))))
+head(dat[, c("Year Month", "Year")])
+
+# Pick the final-outcome column safely (handles "of" vs "Of")
+final_outcome_col <- intersect(c("Outcome of Investigation", "Outcome Of Investigation"), names(dat))
+stopifnot(length(final_outcome_col) == 1)
+
+# Build the base frame (no aggressive filtering yet)
+df_base <- dat %>%
+  filter(`ANZSOC Division` %in% top5_div) %>%
+  transmute(
+    Year,
+    `ANZSOC Division`,
+    outcome = .data[[final_outcome_col]],
+    n = suppressWarnings(as.numeric(Victimisations))
+  )
+
+# Quick, minimal diagnostics (shows why it was empty) 
+cat("Rows in df_base:", nrow(df_base), "\n")
+cat("Missing outcome rows:", sum(is.na(df_base$outcome) | df_base$outcome == ""), "\n")
+cat("Non-missing outcome examples:\n")
+print(head(na.omit(df_base$outcome), 10))
+
+# Yearly resolved rate (final outcome)
+resolved_year <- df_base %>%
+  filter(!is.na(Year), !is.na(outcome), outcome != "") %>%
+  group_by(Year, `ANZSOC Division`) %>%
+  summarise(
+    total    = sum(n, na.rm = TRUE),
+    resolved = sum(if_else(is_resolved(outcome), n, 0), na.rm = TRUE),
+    .groups  = "drop"
+  ) %>%
+  filter(total > 0) %>%                          # remove empty totals *after* aggregating
+  mutate(resolved_rate = resolved / total)
+
+# Apply your short labels (same mapping you used before)
+resolved_year <- resolved_year %>%
+  mutate(`ANZSOC Division` = recode(`ANZSOC Division`,
+    "Robbery, blackmail, and extortion" = "Robbery etc.",
+    "Harm or endanger persons"         = "Harm persons",
+    "Sexual Offences"                  = "Sexual"
+  ))
+
+# another tiny check so you don't plot an empty dataset
+print(head(resolved_year, 10))
+```
+
+```{r, echo=FALSE, fig.width=6, fig.height=3.5, out.width="70%", fig.align='center'}
+# Plot (force y to show 0–100% so flat lines at 0% are visible)
+ggplot(resolved_year, aes(x = Year, y = resolved_rate,
+                          group = `ANZSOC Division`, colour = `ANZSOC Division`)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = sort(unique(resolved_year$Year))) +
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent) +
+  labs(title = "Resolved Rate Across Years (Final Outcome of Investigation)",
+       x = "Year", y = "Resolved rate", colour = "ANZSOC Division") +
+  theme_minimal(base_size = 11)
+```
+
+### Interpretation:
+
+1. Harm persons sustains the strongest performance (35–45%), peaking in 2018–2019 before stabilising.
+2. Assault resolution rates decline steadily from ~33% in 2017 to under 20% by 2022, remaining low thereafter.
+3. Robbery etc. shows mid-range performance (20–27%) until 2020, with a notable decline afterwards.
+4. Sexual offences remain consistently low (10–15%), while Theft stays under 10% throughout.
+
+**Key Takeaway:** The long-term results show that resolution rates in New Zealand have not improved between 2017 and 2025. Instead, the difference between offence types has become larger. Interpersonal crimes such as Harm persons continue to have higher resolution rates, while common property crimes like Theft remain mostly unresolved.
+
+# Discussion
+
+This analysis looked at investigation outcomes across different time periods, offence divisions, and years, focusing on the five ANZSOC divisions with the highest number of victimisations. The results show that resolution patterns differ widely depending on the type of offence, with some categories improving over time and others showing little or no progress.
+
+Resolution rates generally rise as investigations continue, with Harm persons and Robbery etc. almost doubling their resolved cases between 7 and 180 days. These categories benefit from extended follow-up and clearer investigative leads. In contrast, Sexual offences show very limited improvement, reflecting difficulties such as delays in reporting and challenges with evidence. Theft performs worst of all, with fewer than 10% of cases resolved even after six months.
+
+The longer-term view from 2017 to 2025 reinforces these differences. Harm persons has stayed relatively stable at higher resolution levels, while Assault has declined over time. Robbery etc. has weakened in recent years, and Sexual offences remain consistently low. Theft remains the least resolved offence, with no improvement across the entire period.
+
+**Overall to answer the research question, the analysis shows that the proportion of resolved cases increases over time, but the scale of improvement strongly depends on the offence type.** Offences involving direct contact between victims and offenders, such as Harm persons and Robbery etc., show the highest improvement, while Theft and Sexual offences remain largely unresolved even after longer investigation periods.
+
+These patterns indicate that investigative success depends on the nature of the offence and available evidence. While some crimes continue to receive priority and achieve better outcomes, the ongoing backlog of unresolved theft and the difficulties in sexual offence investigations place pressure on police resources and affect overall resolution performance in New Zealand.
+
+## Recommendations
+
+1. **Share Resources More Fairly:** Harm persons and Robbery etc. have higher resolution rates because they get more police attention. Theft and Sexual offences stay mostly unresolved, even after 180 days. Theft alone has over 779,000 reported cases but very few are solved. Police could share time, tools, and staff more evenly so that both serious and high-volume crimes get proper follow-up.
+2. **Improve Case Management and Data Systems:** Many Theft and Sexual offences cases stay open because information is spread across different systems. A shared database could help link related cases and spot repeat offenders. Police could use data analysis to find patterns like repeat offenders, locations or common crime times. Tools such as licence plate checks, CCTV, and recognition tools, used cautiously with strict privacy guidelines could help find suspects faster and connect similar cases. 
+3. **Build Specialist Skills and Support:** Low resolution in Sexual offences shows the need for more training and dedicated teams. Police could create groups that focus only on these cases and work closely with support services. Clear communication with victims and faster forensic results would also help more cases reach closure.
+4. **Strengthen Prevention and Early Action:** Prevention should be part of every investigation plan, especially those that are more challenging to resolve. For Theft, data can show where crimes happen often, helping police and local groups take early action. Community partnerships, early-intervention programs for repeat offenders, and stronger collaboration with local councils and retailers could help reduce new cases. For Sexual offences, more awareness and safe reporting channels can help victims come forward sooner. Using early warnings from data can stop repeat crimes and reduce the number of cases that stay unresolved.
