@@ -44,7 +44,12 @@ nz-crime-resolution-analysis/
 ## Data Source
 The dataset used in this project is sourced from the New Zealand Police Data Portal.
 
-Due to file size limitations, the full dataset is not included in this repository.
+Due to GitHub file size limitations, the full dataset is not included in this repository.
+
+Download the dataset here:  
+https://drive.google.com/file/d/1W8mcloNe7sF4EXCmTbgGAFqX7TTLraTk/view?usp=sharing
+
+After downloading, place the dataset in the `data/` directory before running the analysis.
 
 ## How to Run
 1. Open the R Markdown file in RStudio.
